@@ -5,6 +5,7 @@ import requests
 import pandas as pd
 import numpy as np
 import re
+from CONST import MDIR
 
 # Base url, and a lambda func to return url for a given year
 base_url = "http://kenpom.com/index.php"
@@ -51,21 +52,21 @@ df.columns = [
     "W-L",
     "Pyth",
     "AdjustO",
-    "AdjustO Rank",
+    "AdjustORank",
     "AdjustD",
-    "AdjustD Rank",
+    "AdjustDRank",
     "AdjustT",
-    "AdjustT Rank",
+    "AdjustTRank",
     "Luck",
-    "Luck Rank",
-    "SOS Pyth",
-    "SOS Pyth Rank",
-    "SOS OppO",
-    "SOS OppO Rank",
-    "SOS OppD",
-    "SOS OppD Rank",
-    "NCSOS Pyth",
-    "NCSOS Pyth Rank",
+    "LuckRank",
+    "SOSPyth",
+    "SOSPythRank",
+    "SOSOppO",
+    "SOSOppORank",
+    "SOSOppD",
+    "SOSOppDRank",
+    "NCSOSPyth",
+    "NCSOSPythRank",
     "Year",
 ]
 
@@ -97,22 +98,22 @@ df = df[
         "Seed",
         "Pyth",
         "AdjustO",
-        "AdjustO Rank",
+        "AdjustORank",
         "AdjustD",
-        "AdjustD Rank",
+        "AdjustDRank",
         "AdjustT",
-        "AdjustT Rank",
+        "AdjustTRank",
         "Luck",
-        "Luck Rank",
-        "SOS Pyth",
-        "SOS Pyth Rank",
-        "SOS OppO",
-        "SOS OppO Rank",
-        "SOS OppD",
-        "SOS OppD Rank",
-        "NCSOS Pyth",
-        "NCSOS Pyth Rank",
+        "LuckRank",
+        "SOSPyth",
+        "SOSPythRank",
+        "SOSOppO",
+        "SOSOppORank",
+        "SOSOppD",
+        "SOSOppDRank",
+        "NCSOSPyth",
+        "NCSOSPythRank",
     ]
 ]
 
-# df.to_csv("Mkenpom2021.csv", index=False)
+df.to_csv(f"{MDIR}/MKenPom.csv", index=False)
