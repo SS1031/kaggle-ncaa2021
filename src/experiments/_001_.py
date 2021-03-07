@@ -1,16 +1,26 @@
+import collections
+import os
+
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import os
-import xgboost as xgb
-from sklearn.model_selection import KFold
-from sklearn.metrics import log_loss
-from scipy.interpolate import UnivariateSpline
 import statsmodels.api as sm
-import matplotlib.pyplot as plt
-import collections
+import torch
+import xgboost as xgb
+from pytorch_tabnet.pretraining import TabNetPretrainer
+from pytorch_tabnet.tab_model import TabNetClassifier
+from scipy.interpolate import UnivariateSpline
+from sklearn.metrics import log_loss
+from sklearn.model_selection import KFold
+
+expname = os.path.basename(__file__)
 
 
 INPUTDIR = "../data/ncaam-march-mania-2021"
+OUTPUTDIR = f"../output/{expname}"
+
+if not os.path.exists(OUTPUTDIR):
+    os.makedirs(OUTPUTDIR)
 
 pd.set_option("display.max_column", 999)
 
@@ -158,20 +168,9 @@ def team_quality_features(regular_data, seeds):
         quality["TeamID"] = quality["TeamID"].apply(lambda x: x[10:14]).astype(int)
         return quality
 
-    glm_quality = pd.concat(
-        [
-            team_quality(2010),
-            team_quality(2011),
-            team_quality(2012),
-            team_quality(2013),
-            team_quality(2014),
-            team_quality(2015),
-            team_quality(2016),
-            team_quality(2017),
-            team_quality(2018),
-            team_quality(2019),
-        ]
-    ).reset_index(drop=True)
+    glm_quality = pd.concat([team_quality(year) for year in range(2003, 2020)]).reset_index(
+        drop=True
+    )
 
     return glm_quality
 
@@ -203,15 +202,179 @@ tourney_data = tourney_data[["Season", "DayNum", "T1_TeamID", "T1_Score", "T2_Te
 tourney_data = pd.merge(tourney_data, season_stats_T1, on=["Season", "T1_TeamID"], how="left")
 tourney_data = pd.merge(tourney_data, season_stats_T2, on=["Season", "T2_TeamID"], how="left")
 
-team_quality = team_quality_features(regular_data, seeds)
-team_quality_T1 = team_quality.copy()
-team_quality_T1.columns = ["T1_TeamID", "T1_quality", "Season"]
-team_quality_T2 = team_quality.copy()
-team_quality_T2.columns = ["T2_TeamID", "T2_quality", "Season"]
-tourney_data = pd.merge(tourney_data, team_quality_T1, on=["Season", "T1_TeamID"], how="left")
-tourney_data = pd.merge(tourney_data, team_quality_T2, on=["Season", "T2_TeamID"], how="left")
+# team_quality = team_quality_features(regular_data, seeds)
+# team_quality_T1 = team_quality.copy()
+# team_quality_T1.columns = ["T1_TeamID", "T1_quality", "Season"]
+# team_quality_T2 = team_quality.copy()
+# team_quality_T2.columns = ["T2_TeamID", "T2_quality", "Season"]
+# tourney_data = pd.merge(tourney_data, team_quality_T1, on=["Season", "T1_TeamID"], how="left")
+# tourney_data = pd.merge(tourney_data, team_quality_T2, on=["Season", "T2_TeamID"], how="left")
+# tourney_data["T1_quality"] = (
+#     tourney_data["T1_quality"].replace([np.inf, -np.inf], np.nan).fillna(0)
+# )
+# tourney_data["T2_quality"] = (
+#     tourney_data["T2_quality"].replace([np.inf, -np.inf], np.nan).fillna(0)
+# )
+
+# KenPom, https://www.kaggle.com/paulorzp/kenpom-scraper-2021/output
+kenpom = pd.read_csv(f"{INPUTDIR}/MKenpom.csv")
+# kenpom["win"] = kenpom.record.str.split("-", expend=True)[0]
+# kenpom["lose"] = kenpom.record.str.split("-", expand=False)[1]
+kenpom_cols = [
+    "rank",
+    "adj_em",
+    "adj_o",
+    "adj_o_rank",
+    "adj_d",
+    "adj_d_rank",
+    "adj_tempo",
+    "adj_tempo_rank",
+    "luck",
+    "luck_rank",
+    "sos_adj_em",
+    "sos_adj_em_rank",
+    "sos_adj_o",
+    "sos_adj_o_rank",
+    "sos_adj_d",
+    "sos_adj_d_rank",
+    "nc_sos_adj_em",
+    "nc_sos_adj_em_rank",
+]
+T1_kenpom = (
+    kenpom[["Season", "TeamID"] + kenpom_cols].copy().rename(columns={"TeamID": "T1_TeamID"})
+)
+T1_kenpom = T1_kenpom.rename(columns={c: "T1_kenpom_" + c for c in kenpom_cols})
+T2_kenpom = (
+    kenpom[["Season", "TeamID"] + kenpom_cols].copy().rename(columns={"TeamID": "T2_TeamID"})
+)
+T2_kenpom = T2_kenpom.rename(columns={c: "T2_kenpom_" + c for c in kenpom_cols})
+
+tourney_data = tourney_data.merge(T1_kenpom, on=["Season", "T1_TeamID"], how="left")
+tourney_data = tourney_data.merge(T2_kenpom, on=["Season", "T2_TeamID"], how="left")
+
+diff_kenpom_cols = [
+    "adj_o",
+    "adj_o_rank",
+    "adj_d",
+    "adj_d_rank",
+    "adj_tempo",
+    "adj_tempo_rank",
+    "sos_adj_em",
+    "sos_adj_em_rank",
+    "sos_adj_o",
+    "sos_adj_o_rank",
+    "sos_adj_d",
+    "sos_adj_d_rank",
+]
+
+for col in diff_kenpom_cols:
+    tourney_data[f"diff_kenpom_{col}"] = (
+        tourney_data[f"T1_kenpom_{col}"] - tourney_data[f"T2_kenpom_{col}"]
+    )
+
 
 seeds_features = create_seeds_features(tourney_data, seeds)
 tourney_data = pd.merge(
     tourney_data, seeds_features, on=["Season", "T1_TeamID", "T2_TeamID"], how="left"
+)
+
+meta_cols = ["Season", "T1_TeamID", "T2_TeamID", "T1_Score", "T2_Score"]
+feat_cols = [c for c in tourney_data.columns if c not in meta_cols]
+
+y = (tourney_data["T1_Score"] > tourney_data["T2_Score"]).astype(int)
+
+val_season = 2018
+X_trn = tourney_data.loc[tourney_data.Season != val_season, feat_cols].values
+y_trn = y.loc[tourney_data.Season != val_season].values
+X_vld = tourney_data.loc[tourney_data.Season == val_season, feat_cols].values
+y_vld = y.loc[tourney_data.Season == val_season].values
+
+print("Data split")
+print(f"     Shape of train x, y = {X_trn.shape}, {y_trn.shape}")
+print(f"     Shape of valid x, y = {X_vld.shape}, {y_vld.shape}")
+
+# y = tourney_data["T1_Score"] - tourney_data["T2_Score"]
+print("Objective describe: \n", y.describe())
+
+
+# TabNetPretrainer
+unsupervised_model = TabNetPretrainer(
+    optimizer_fn=torch.optim.Adam,
+    optimizer_params=dict(lr=2e-2),
+    mask_type="entmax",  # "sparsemax"
+)
+max_epochs = 1000
+unsupervised_model.fit(
+    X_train=X_trn,
+    eval_set=[X_vld],
+    max_epochs=max_epochs,
+    patience=50,
+    batch_size=2048,
+    virtual_batch_size=64,
+    num_workers=0,
+    drop_last=False,
+    pretraining_ratio=0.8,
+)
+
+# Make reconstruction from a dataset
+reconstructed_X, embedded_X = unsupervised_model.predict(X_vld)
+assert reconstructed_X.shape == embedded_X.shape
+
+unsupervised_explain_matrix, unsupervised_masks = unsupervised_model.explain(X_vld)
+fig, axs = plt.subplots(1, 3, figsize=(20, 20))
+for i in range(3):
+    axs[i].imshow(unsupervised_masks[i][:50])
+    axs[i].set_title(f"mask {i}")
+plt.show()
+
+unsupervised_model.save_model(f"{OUTPUTDIR}/test_pretrain")
+loaded_pretrain = TabNetPretrainer()
+loaded_pretrain.load_model(f"{OUTPUTDIR}/test_pretrain.zip")
+
+clf = TabNetClassifier(
+    optimizer_fn=torch.optim.Adam,
+    optimizer_params=dict(lr=1e-1),
+    scheduler_params={"gamma": 0.95},  # how to use learning rate scheduler
+    scheduler_fn=torch.optim.lr_scheduler.ExponentialLR,
+    mask_type="sparsemax",  # This will be overwritten if using pretrain model
+)
+
+clf.fit(
+    X_train=X_trn,
+    y_train=y_trn,
+    eval_set=[(X_trn, y_trn), (X_vld, y_vld)],
+    eval_name=["train", "valid"],
+    eval_metric=["logloss"],
+    max_epochs=max_epochs,
+    patience=50,
+    batch_size=128,
+    virtual_batch_size=128,
+    num_workers=0,
+    weights=1,
+    drop_last=False,
+    from_unsupervised=loaded_pretrain,
+)
+
+plt.plot(clf.history["loss"])
+plt.show()
+
+# plot auc
+plt.plot(clf.history["train_logloss"])
+plt.show()
+plt.plot(clf.history["valid_logloss"])
+plt.show()
+
+# plot learning rates
+plt.plot(clf.history["lr"])
+plt.show()
+
+
+preds_vld = clf.predict_proba(X_vld).astype(np.float64)
+vld_logloss_score = log_loss(y_vld, preds_vld[:, 1])
+
+print(vld_logloss_score)
+print(
+    pd.DataFrame({"feature": feat_cols, "importance": clf.feature_importances_})
+    .sort_values(by="importance", ascending=False)
+    .head(50)
 )
