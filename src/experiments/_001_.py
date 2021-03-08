@@ -13,6 +13,9 @@ from scipy.interpolate import UnivariateSpline
 from sklearn.metrics import log_loss
 from sklearn.model_selection import KFold
 
+import seaborn as sns
+
+
 expname = os.path.basename(__file__)
 
 
@@ -272,109 +275,89 @@ for col in diff_kenpom_cols:
         tourney_data[f"T1_kenpom_{col}"] - tourney_data[f"T2_kenpom_{col}"]
     )
 
-
 seeds_features = create_seeds_features(tourney_data, seeds)
 tourney_data = pd.merge(
     tourney_data, seeds_features, on=["Season", "T1_TeamID", "T2_TeamID"], how="left"
 )
 
-meta_cols = ["Season", "T1_TeamID", "T2_TeamID", "T1_Score", "T2_Score"]
+meta_cols = ["Season", "DayNum", "T1_TeamID", "T2_TeamID", "T1_Score", "T2_Score"]
 feat_cols = [c for c in tourney_data.columns if c not in meta_cols]
 
-y = (tourney_data["T1_Score"] > tourney_data["T2_Score"]).astype(int)
+X = tourney_data[feat_cols].values
+y = (tourney_data["T1_Score"] > tourney_data["T2_Score"]).astype(int).values
 
-val_season = 2018
-X_trn = tourney_data.loc[tourney_data.Season != val_season, feat_cols].values
-y_trn = y.loc[tourney_data.Season != val_season].values
-X_vld = tourney_data.loc[tourney_data.Season == val_season, feat_cols].values
-y_vld = y.loc[tourney_data.Season == val_season].values
+preds = (tourney_data["T1_Score"] > tourney_data["T2_Score"]).astype(np.float64).values
+scores = []
+importances = pd.DataFrame()
+kfold = KFold(n_splits=3, shuffle=True, random_state=42)
+for fold, (trn_index, vld_index) in enumerate(kfold.split(X, y)):
+    X_trn, y_trn = X[trn_index], y[trn_index]
+    X_vld, y_vld = X[vld_index], y[vld_index]
+    print(f"Fold {fold}, data split")
+    print(f"     Shape of train x, y = {X_trn.shape}, {y_trn.shape}")
+    print(f"     Shape of valid x, y = {X_vld.shape}, {y_vld.shape}")
 
-print("Data split")
-print(f"     Shape of train x, y = {X_trn.shape}, {y_trn.shape}")
-print(f"     Shape of valid x, y = {X_vld.shape}, {y_vld.shape}")
+    # TabNetPretrainer
+    unsupervised_model = TabNetPretrainer(
+        optimizer_fn=torch.optim.Adam,
+        optimizer_params=dict(lr=2e-2),
+        mask_type="entmax",  # "sparsemax"
+    )
+    max_epochs = 1000
+    unsupervised_model.fit(
+        X_train=X_trn,
+        eval_set=[X_vld],
+        max_epochs=max_epochs,
+        patience=25,
+        batch_size=2048,
+        virtual_batch_size=64,
+        num_workers=0,
+        drop_last=False,
+        pretraining_ratio=0.8,
+    )
 
-# y = tourney_data["T1_Score"] - tourney_data["T2_Score"]
-print("Objective describe: \n", y.describe())
+    unsupervised_model.save_model(f"{OUTPUTDIR}/test_pretrain_fold{fold}")
+    loaded_pretrain = TabNetPretrainer()
+    loaded_pretrain.load_model(f"{OUTPUTDIR}/test_pretrain_fold{fold}.zip")
+
+    clf = TabNetClassifier(
+        optimizer_fn=torch.optim.Adam,
+        optimizer_params=dict(lr=2e-1),
+        scheduler_params={"gamma": 0.95},  # how to use learning rate scheduler
+        scheduler_fn=torch.optim.lr_scheduler.ExponentialLR,
+        mask_type="sparsemax",  # This will be overwritten if using pretrain model
+    )
+
+    clf.fit(
+        X_train=X_trn,
+        y_train=y_trn,
+        eval_set=[(X_trn, y_trn), (X_vld, y_vld)],
+        eval_name=["train", "valid"],
+        eval_metric=["logloss"],
+        max_epochs=max_epochs,
+        patience=25,
+        batch_size=128,
+        virtual_batch_size=128,
+        num_workers=0,
+        weights=1,
+        drop_last=False,
+        from_unsupervised=loaded_pretrain,
+    )
+
+    fold_preds = clf.predict_proba(X_vld).astype(np.float64)
+    preds[vld_index] = fold_preds[:, 1]
+    scores.append(log_loss(y_vld, fold_preds[:, 1]))
+    importances = pd.concat(
+        [importances, pd.DataFrame({"feature": feat_cols, "importance": clf.feature_importances_})],
+        axis=0,
+    )
 
 
-# TabNetPretrainer
-unsupervised_model = TabNetPretrainer(
-    optimizer_fn=torch.optim.Adam,
-    optimizer_params=dict(lr=2e-2),
-    mask_type="entmax",  # "sparsemax"
+fig, ax = plt.subplots(figsize=(6, 18))
+sns.barplot(
+    data=importances,
+    x="importance",
+    y="feature",
+    order=importances.groupby("feature").importance.mean().sort_values(ascending=False).index,
 )
-max_epochs = 1000
-unsupervised_model.fit(
-    X_train=X_trn,
-    eval_set=[X_vld],
-    max_epochs=max_epochs,
-    patience=50,
-    batch_size=2048,
-    virtual_batch_size=64,
-    num_workers=0,
-    drop_last=False,
-    pretraining_ratio=0.8,
-)
-
-# Make reconstruction from a dataset
-reconstructed_X, embedded_X = unsupervised_model.predict(X_vld)
-assert reconstructed_X.shape == embedded_X.shape
-
-unsupervised_explain_matrix, unsupervised_masks = unsupervised_model.explain(X_vld)
-fig, axs = plt.subplots(1, 3, figsize=(20, 20))
-for i in range(3):
-    axs[i].imshow(unsupervised_masks[i][:50])
-    axs[i].set_title(f"mask {i}")
 plt.show()
-
-unsupervised_model.save_model(f"{OUTPUTDIR}/test_pretrain")
-loaded_pretrain = TabNetPretrainer()
-loaded_pretrain.load_model(f"{OUTPUTDIR}/test_pretrain.zip")
-
-clf = TabNetClassifier(
-    optimizer_fn=torch.optim.Adam,
-    optimizer_params=dict(lr=1e-1),
-    scheduler_params={"gamma": 0.95},  # how to use learning rate scheduler
-    scheduler_fn=torch.optim.lr_scheduler.ExponentialLR,
-    mask_type="sparsemax",  # This will be overwritten if using pretrain model
-)
-
-clf.fit(
-    X_train=X_trn,
-    y_train=y_trn,
-    eval_set=[(X_trn, y_trn), (X_vld, y_vld)],
-    eval_name=["train", "valid"],
-    eval_metric=["logloss"],
-    max_epochs=max_epochs,
-    patience=50,
-    batch_size=128,
-    virtual_batch_size=128,
-    num_workers=0,
-    weights=1,
-    drop_last=False,
-    from_unsupervised=loaded_pretrain,
-)
-
-plt.plot(clf.history["loss"])
-plt.show()
-
-# plot auc
-plt.plot(clf.history["train_logloss"])
-plt.show()
-plt.plot(clf.history["valid_logloss"])
-plt.show()
-
-# plot learning rates
-plt.plot(clf.history["lr"])
-plt.show()
-
-
-preds_vld = clf.predict_proba(X_vld).astype(np.float64)
-vld_logloss_score = log_loss(y_vld, preds_vld[:, 1])
-
-print(vld_logloss_score)
-print(
-    pd.DataFrame({"feature": feat_cols, "importance": clf.feature_importances_})
-    .sort_values(by="importance", ascending=False)
-    .head(50)
-)
