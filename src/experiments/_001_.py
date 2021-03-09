@@ -20,7 +20,7 @@ expname = os.path.basename(__file__)
 
 
 INPUTDIR = "../data/ncaam-march-mania-2021"
-OUTPUTDIR = f"../output/{expname}"
+OUTPUTDIR = f"../output/{expname.replace('.py','')}"
 
 if not os.path.exists(OUTPUTDIR):
     os.makedirs(OUTPUTDIR)
