@@ -12,7 +12,7 @@ from pytorch_tabnet.pretraining import TabNetPretrainer
 from pytorch_tabnet.tab_model import TabNetClassifier
 from scipy.interpolate import UnivariateSpline
 from sklearn.metrics import log_loss
-from sklearn.model_selection import KFold, StratifiedKFold
+from sklearn.model_selection import KFold, StratifiedKFold, StratifiedShuffleSplit, train_test_split
 
 STAGE_1 = True
 
@@ -459,8 +459,30 @@ from sklearn.preprocessing import StandardScaler
 
 X = StandardScaler().fit_transform(train[feat_cols].values)
 y = train.result.copy().values
-preds = train.result.copy().values
+X_trn, X_vld, _, _ = train_test_split(X, y, random_state=42, shuffle=True)
 
+# TabNetPretrainer
+unsupervised_model = TabNetPretrainer(
+    optimizer_fn=torch.optim.Adam,
+    optimizer_params=dict(lr=2e-2),
+    mask_type="sparsemax",  # "sparsemax"
+)
+max_epochs = 1000
+unsupervised_model.fit(
+    X_train=X_trn,
+    eval_set=[X_vld],
+    max_epochs=max_epochs,
+    patience=10,
+    batch_size=512,
+    virtual_batch_size=64,
+    num_workers=0,
+    drop_last=False,
+    pretraining_ratio=0.8,
+)
+
+unsupervised_model.save_model(f"{OUTPUTDIR}/pretrain")
+
+preds = train.result.copy().values
 scores = []
 importances = pd.DataFrame()
 kfold = KFold(n_splits=5, shuffle=True, random_state=42)
@@ -471,29 +493,8 @@ for fold, (trn_index, vld_index) in enumerate(kfold.split(X, y)):
     print(f"     Shape of train x, y = {X_trn.shape}, {y_trn.shape}")
     print(f"     Shape of valid x, y = {X_vld.shape}, {y_vld.shape}")
 
-    # TabNetPretrainer
-    unsupervised_model = TabNetPretrainer(
-        optimizer_fn=torch.optim.Adam,
-        optimizer_params=dict(lr=2e-2),
-        mask_type="sparsemax",  # "sparsemax"
-    )
-    max_epochs = 1000
-    unsupervised_model.fit(
-        X_train=X_trn,
-        eval_set=[X_vld],
-        max_epochs=max_epochs,
-        patience=10,
-        batch_size=512,
-        virtual_batch_size=64,
-        num_workers=0,
-        drop_last=False,
-        pretraining_ratio=0.8,
-    )
-
-    unsupervised_model.save_model(f"{OUTPUTDIR}/test_pretrain_fold{fold}")
     loaded_pretrain = TabNetPretrainer()
-    loaded_pretrain.load_model(f"{OUTPUTDIR}/test_pretrain_fold{fold}.zip")
-
+    loaded_pretrain.load_model(f"{OUTPUTDIR}/pretrain.zip")
     clf = TabNetClassifier(
         optimizer_fn=torch.optim.Adam,
         optimizer_params=dict(lr=2e-1),
@@ -535,3 +536,4 @@ sns.barplot(
     order=importances.groupby("feature").importance.mean().sort_values(ascending=False).index,
 )
 plt.show()
+np.mean([0.52951, 0.43893, 0.48130, 0.43857, 0.53194, 0.41477])
