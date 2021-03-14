@@ -15,6 +15,8 @@ from pytorch_tabnet.tab_model import TabNetClassifier
 from scipy.interpolate import UnivariateSpline
 from sklearn.metrics import log_loss
 from sklearn.model_selection import KFold, StratifiedKFold, StratifiedShuffleSplit, train_test_split
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import GridSearchCV
 
 sns.set()
 
@@ -434,8 +436,8 @@ def merge_data(df):
 train = merge_data(tourney)
 train = train.loc[train.Season >= 2003, :].reset_index(drop=True)
 
-# if STAGE_1:
-#     train = train.loc[train.Season < 2015, :]
+if STAGE_1:
+    train = train.loc[train.Season < 2015, :]
 
 if STAGE_1:
     MSampleSubmission = pd.read_csv(INPUTDIR + "/MSampleSubmissionStage1.csv")
@@ -471,10 +473,11 @@ feat_cols = [c for c in train.columns if c not in no_feature_cols]
 
 from sklearn.preprocessing import StandardScaler
 
-X = StandardScaler().fit_transform(train[feat_cols].values)
-# y = train.result.copy().values
-y = train.result_score.astype("float64").copy()
-X_trn, X_vld, _, _ = train_test_split(X, y, random_state=42, shuffle=True)
+X = train[feat_cols].values
+X_tst = test[feat_cols].values
+d_tst = xgb.DMatrix(X_tst, feature_names=feat_cols)
+y_binary = train.result.astype("float64").copy().values
+y_spread = train.result_score.astype("float64").copy().values
 
 
 def cauchyobj(preds, dtrain):
@@ -488,57 +491,67 @@ def cauchyobj(preds, dtrain):
 
 param = {}
 # param['objective'] = 'reg:linear'
-param["eval_metric"] = "mae"
+param["eta"] = 0.02  # change to ~0.02 for final run
+param["gamma"] = 0
+param["max_depth"] = 6
+param["min_child_weight"] = 25
+param["subsample"] = 0.5
+param["colsample_bytree"] = 0.5
+param["lambda"] = 10
 param["booster"] = "gbtree"
-param["eta"] = 0.05  # change to ~0.02 for final run
-param["subsample"] = 0.35
-param["colsample_bytree"] = 0.7
-param["num_parallel_tree"] = 3  # recommend 10
-param["min_child_weight"] = 40
-param["gamma"] = 10
-param["max_depth"] = 3
-param["silent"] = 1
+param["eval_metric"] = "mae"
+param["num_parallel_tree"] = 10  # recommend 10
 
-oof_preds = train.result_score.astype("float64").copy()
+
+oof_preds = []
+test_preds = []
+
 scores = []
 importances = pd.DataFrame()
-kfold = KFold(n_splits=5, shuffle=True, random_state=42)
-for fold, (trn_index, vld_index) in enumerate(kfold.split(X, y)):
-    X_trn, y_trn = X[trn_index], y[trn_index]
-    X_vld, y_vld = X[vld_index], y[vld_index]
-    print(f"Fold {fold}, data split")
-    print(f"     Shape of train x, y = {X_trn.shape}, {y_trn.shape}")
-    print(f"     Shape of valid x, y = {X_vld.shape}, {y_vld.shape}")
+cv_repeat = 10
 
-    d_trn = xgb.DMatrix(X_trn, y_trn, feature_names=feat_cols)
-    d_vld = xgb.DMatrix(X_vld, y_vld, feature_names=feat_cols)
-    model = xgb.train(
-        params=param,
-        dtrain=d_trn,
-        evals=[(d_vld, "valid")],
-        obj=cauchyobj,
-        early_stopping_rounds=25,
-        num_boost_round=1000,
-        verbose_eval=50,
-    )
+for i in range(cv_repeat):
+    print(f"CV {i + 1}")
+    oof = train.result_score.astype("float64").copy().values
+    kfold = KFold(n_splits=5, shuffle=True, random_state=i * 42)
+    _test_preds = []
+    for fold, (trn_index, vld_index) in enumerate(kfold.split(X, y_spread)):
+        X_trn, y_trn = X[trn_index], y_spread[trn_index]
+        X_vld, y_vld = X[vld_index], y_spread[vld_index]
+        print(f"    Fold {fold}, data split")
+        print(f"         Shape of train x, y = {X_trn.shape}, {y_trn.shape}")
+        print(f"         Shape of valid x, y = {X_vld.shape}, {y_vld.shape}")
+        d_trn = xgb.DMatrix(X_trn, y_trn, feature_names=feat_cols)
+        d_vld = xgb.DMatrix(X_vld, y_vld, feature_names=feat_cols)
+        model = xgb.train(
+            params=param,
+            dtrain=d_trn,
+            evals=[(d_vld, "valid")],
+            obj=cauchyobj,
+            early_stopping_rounds=25,
+            num_boost_round=10000,
+            verbose_eval=False,
+        )
 
-    fold_oof_preds = model.predict(d_vld).astype(np.float64)
-    oof_preds[vld_index] = fold_oof_preds
-    # scores.append(log_loss(y_vld, fold_oof_preds))
-    importance_dict = model.get_score(importance_type="gain")
-    importances = pd.concat(
-        [
-            importances,
-            pd.DataFrame(
-                {
-                    "feature": list(importance_dict.keys()),
-                    "importance": list(importance_dict.values()),
-                }
-            ),
-        ],
-        axis=0,
-    )
+        fold_oof_preds = model.predict(d_vld).astype(np.float64)
+        oof[vld_index] = fold_oof_preds
+        _test_preds.append(model.predict(d_tst))
 
+        importance_dict = model.get_score(importance_type="gain")
+        importances = pd.concat(
+            [
+                importances,
+                pd.DataFrame(
+                    {
+                        "feature": list(importance_dict.keys()),
+                        "importance": list(importance_dict.values()),
+                    }
+                ),
+            ],
+            axis=0,
+        )
+    oof_preds.append(oof)
+    test_preds.append(np.mean(_test_preds, axis=0))
 
 fig, ax = plt.subplots(figsize=(6, 18))
 sns.barplot(
@@ -550,31 +563,47 @@ sns.barplot(
 plt.show()
 
 
-dat = list(zip(oof_preds, np.where(y > 0, 1, 0)))
-dat = sorted(dat, key=lambda x: x[0])
-datdict = {}
-for k in range(len(dat)):
-    datdict[dat[k][0]] = dat[k][1]
+test_lr_outputs = []
+for i in range(cv_repeat):
+    oof = oof_preds[i]
+    test = test_preds[i]
 
-spline_model = UnivariateSpline(list(datdict.keys()), list(datdict.values()))
-spline_fit = spline_model(oof_preds)
+    dat = list(zip(oof, y_binary))
+    dat = sorted(dat, key=lambda x: x[0])
+    datdict = {}
+    for k in range(len(dat)):
+        datdict[dat[k][0]] = dat[k][1]
+    spline_model = UnivariateSpline(list(datdict.keys()), list(datdict.values()))
+    spline_output = spline_model(oof)
+    spline_output[spline_output <= 0.025] = 0.025
+    spline_output[spline_output >= 0.975] = 0.975
 
-from sklearn.linear_model import LogisticRegression
+    param_grid = {"C": [0.00001, 0.0001, 0.001, 0.01, 0.1, 1, 10, 100, 1000]}
+    lr_model = GridSearchCV(LogisticRegression(penalty="l2"), param_grid, scoring="neg_log_loss")
+    lr_model.fit(oof.reshape(-1, 1), y_binary)
+    lr_output = lr_model.predict_proba(oof.reshape(-1, 1))[:, 1]
+    lr_output[lr_output <= 0.025] = 0.025
+    lr_output[lr_output >= 0.975] = 0.975
+    plot_df = pd.DataFrame(
+        {"pred": oof, "label": y_binary, "spline": spline_output, "lr": lr_output}
+    )
+    plot_df["pred_int"] = plot_df["pred"].astype(int)
+    plot_df = plot_df.groupby("pred_int")[["spline", "label", "lr"]].mean().reset_index()
+    fig, ax1 = plt.subplots(figsize=(6, 4))
+    ax1.plot(plot_df.pred_int, plot_df.label)
+    ax1.plot(plot_df.pred_int, plot_df.spline)
+    ax1.plot(plot_df.pred_int, plot_df.lr)
+    plt.show()
 
-lr_model = LogisticRegression()
-lr_model.fit(oof_preds.values.reshape(-1, 1), np.where(y > 0, 1, 0).reshape(-1, 1))
-lr_fit = lr_model.predict_proba(oof_preds.values.reshape(-1, 1))[:, 1]
-
-plot_df = pd.DataFrame(
-    {"pred": oof_preds, "label": np.where(y > 0, 1, 0), "spline": spline_fit, "lr": lr_fit}
-)
-plot_df["pred_int"] = plot_df["pred"].astype(int)
-plot_df = plot_df.groupby("pred_int")[["spline", "label", "lr"]].mean().reset_index()
-fig, ax1 = plt.subplots(figsize=(8, 8))
-ax1.plot(plot_df.pred_int, plot_df.label)
-ax1.plot(plot_df.pred_int, plot_df.spline)
-ax1.plot(plot_df.pred_int, plot_df.lr)
-plt.show()
+    print(log_loss(y_binary, lr_output))
+    print(log_loss(y_binary, spline_output))
+    test_lr_outputs.append(lr_model.predict_proba(test.reshape(-1, 1))[:, 1])
 
 
+mss = MSampleSubmission.copy()
+test_lr_output = np.mean(test_lr_outputs, axis=0)[: mss.shape[0]]
+mss["Pred"] = test_lr_output.copy()
+mss.loc[mss.Pred <= 0.025, "Pred"] = 0.025
+mss.loc[mss.Pred >= 0.975, "Pred"] = 0.975
 
+mss.to_csv(f"{OUTPUTDIR}/submit{expname.replane('_', '')}.csv", index=False)
