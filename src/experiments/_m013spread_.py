@@ -21,42 +21,42 @@ from sklearn.model_selection import GridSearchCV
 
 sns.set()
 
-STAGE_1 = True
+STAGE_1 = False
 
 expname = os.path.basename(__file__).replace(".py", "")
 
-INPUTDIR = "../data/ncaaw-march-mania-2021"
+INPUTDIR = "../data/ncaam-march-mania-2021/MDataFiles_Stage2"
 OUTPUTDIR = f"../output/{expname}"
 
 if not os.path.exists(OUTPUTDIR):
     os.makedirs(OUTPUTDIR)
 
-WRSCResults = pd.read_csv(INPUTDIR + "/WRegularSeasonCompactResults.csv")
+MRSCResults = pd.read_csv(INPUTDIR + "/MRegularSeasonCompactResults.csv")
 
 # 勝率
 A_w = (
-    WRSCResults[WRSCResults.WLoc == "A"]
+    MRSCResults[MRSCResults.WLoc == "A"]
     .groupby(["Season", "WTeamID"])["WTeamID"]
     .count()
     .to_frame()
     .rename(columns={"WTeamID": "win_A"})
 )
 N_w = (
-    WRSCResults[WRSCResults.WLoc == "N"]
+    MRSCResults[MRSCResults.WLoc == "N"]
     .groupby(["Season", "WTeamID"])["WTeamID"]
     .count()
     .to_frame()
     .rename(columns={"WTeamID": "win_N"})
 )
 H_w = (
-    WRSCResults[WRSCResults.WLoc == "H"]
+    MRSCResults[MRSCResults.WLoc == "H"]
     .groupby(["Season", "WTeamID"])["WTeamID"]
     .count()
     .to_frame()
     .rename(columns={"WTeamID": "win_H"})
 )
 after118_w = (
-    WRSCResults[WRSCResults.DayNum >= 118]
+    MRSCResults[MRSCResults.DayNum >= 118]
     .groupby(["Season", "WTeamID"])["WTeamID"]
     .count()
     .to_frame()
@@ -66,28 +66,28 @@ win = A_w.join(N_w, how="outer").join(H_w, how="outer").join(after118_w, how="ou
 
 
 H_l = (
-    WRSCResults[WRSCResults.WLoc == "A"]
+    MRSCResults[MRSCResults.WLoc == "A"]
     .groupby(["Season", "LTeamID"])["LTeamID"]
     .count()
     .to_frame()
     .rename(columns={"LTeamID": "lost_H"})
 )
 N_l = (
-    WRSCResults[WRSCResults.WLoc == "N"]
+    MRSCResults[MRSCResults.WLoc == "N"]
     .groupby(["Season", "LTeamID"])["LTeamID"]
     .count()
     .to_frame()
     .rename(columns={"LTeamID": "lost_N"})
 )
 A_l = (
-    WRSCResults[WRSCResults.WLoc == "H"]
+    MRSCResults[MRSCResults.WLoc == "H"]
     .groupby(["Season", "LTeamID"])["LTeamID"]
     .count()
     .to_frame()
     .rename(columns={"LTeamID": "lost_A"})
 )
 after118_l = (
-    WRSCResults[WRSCResults.DayNum >= 118]
+    MRSCResults[MRSCResults.DayNum >= 118]
     .groupby(["Season", "LTeamID"])["LTeamID"]
     .count()
     .to_frame()
@@ -109,11 +109,11 @@ wl["win_pct_after118"] = (wl["win_after118"]) / (wl["win_after118"] + wl["lost_a
 del A_w, N_w, H_w, H_l, N_l, A_l, win, lost
 
 # スコア関連
-WRSCResults["ScoreDiff"] = WRSCResults.WScore - WRSCResults.LScore
+MRSCResults["ScoreDiff"] = MRSCResults.WScore - MRSCResults.LScore
 
-w_scr = WRSCResults.loc[:, ["Season", "WTeamID", "WScore", "WLoc", "ScoreDiff"]]
+w_scr = MRSCResults.loc[:, ["Season", "WTeamID", "WScore", "WLoc", "ScoreDiff"]]
 w_scr.columns = ["Season", "TeamID", "Score", "Loc", "ScoreDiff"]
-l_scr = WRSCResults.loc[:, ["Season", "LTeamID", "LScore", "WLoc", "ScoreDiff"]]
+l_scr = MRSCResults.loc[:, ["Season", "LTeamID", "LScore", "WLoc", "ScoreDiff"]]
 l_scr["WLoc"] = l_scr.WLoc.apply(lambda x: "H" if x == "A" else "A" if x == "H" else "N")
 l_scr["ScoreDiff"] = -1 * l_scr.ScoreDiff
 l_scr.columns = ["Season", "TeamID", "Score", "Loc", "ScoreDiff"]
@@ -150,15 +150,15 @@ scr = (
     .reset_index()
 )
 
-# del w_scr, l_scr, wl_scr, A_scr, H_scr, N_scr, All_scr
+del w_scr, l_scr, wl_scr, A_scr, H_scr, N_scr, All_scr
 
 
 # Details
-WRSDetailedResults = pd.read_csv(INPUTDIR + "/WRegularSeasonDetailedResults.csv")
+MRSDetailedResults = pd.read_csv(INPUTDIR + "/MRegularSeasonDetailedResults.csv")
 
 non_feature_cols = ["Season", "DayNum", "WTeamID"]
 
-w = WRSDetailedResults.loc[
+w = MRSDetailedResults.loc[
     :,
     [
         "Season",
@@ -195,7 +195,7 @@ w.columns = [
     "Blk",
     "PF",
 ]
-l = WRSDetailedResults.loc[
+l = MRSDetailedResults.loc[
     :,
     [
         "Season",
@@ -266,7 +266,56 @@ season_stats = (
     .reset_index()
 )
 
-del w, l, detail
+# del w, l, detail
+
+# MassyOrdinals
+MMOrdinals = pd.read_csv(INPUTDIR + "/MMasseyOrdinals.csv")
+
+MOR_127_128 = MMOrdinals[
+    (MMOrdinals.SystemName == "MOR")
+    & ((MMOrdinals.RankingDayNum == 127) | (MMOrdinals.RankingDayNum == 128))
+][["Season", "TeamID", "OrdinalRank"]]
+MOR_50_51 = MMOrdinals[
+    (MMOrdinals.SystemName == "MOR")
+    & ((MMOrdinals.RankingDayNum == 50) | (MMOrdinals.RankingDayNum == 51))
+][["Season", "TeamID", "OrdinalRank"]]
+# MOR_15_16 = MMOrdinals[
+#     (MMOrdinals.SystemName == "MOR")
+#     & ((MMOrdinals.RankingDayNum == 15) | (MMOrdinals.RankingDayNum == 16))
+# ][["Season", "TeamID", "OrdinalRank"]]
+
+MOR_127_128 = MOR_127_128.rename(columns={"OrdinalRank": "OrdinalRank_127_128"})
+MOR_50_51 = MOR_50_51.rename(columns={"OrdinalRank": "OrdinalRank_50_51"})
+# MOR_15_16 = MOR_15_16.rename(columns={"OrdinalRank": "OrdinalRank_15_16"})
+
+MOR = MOR_127_128.merge(MOR_50_51, how="left", on=["Season", "TeamID"])
+
+## normalizing Rank values by its season maxium as it varies by seasons
+MOR_max = MOR.groupby("Season")[["OrdinalRank_127_128", "OrdinalRank_50_51"]].max().reset_index()
+MOR_max.columns = ["Season", "maxRank_127_128", "maxRank_50_51"]
+
+MOR_tmp = MMOrdinals[(MMOrdinals.SystemName == "MOR") & (MMOrdinals.RankingDayNum < 133)]
+MOR_stats = (
+    MOR_tmp.groupby(["Season", "TeamID"])["OrdinalRank"]
+    .agg(["max", "min", "std", "mean"])
+    .reset_index()
+)
+MOR_stats.columns = ["Season", "TeamID", "RankMax", "RankMin", "RankStd", "RankMean"]
+
+MOR = MOR.merge(MOR_max, how="left", on="Season").merge(
+    MOR_stats, how="left", on=["Season", "TeamID"]
+)
+MOR["OrdinalRank_127_128"] = MOR["OrdinalRank_127_128"] / MOR["maxRank_127_128"]  # ランキングの最大値で正規化
+MOR["OrdinalRank_50_51"] = MOR["OrdinalRank_50_51"] / MOR["maxRank_50_51"]  # ランキングの最大値で正規化
+MOR["RankTrans_50_51_to_127_128"] = MOR["OrdinalRank_127_128"] - MOR["OrdinalRank_50_51"]
+
+MOR.drop(
+    ["maxRank_50_51", "maxRank_127_128"],
+    axis=1,
+    inplace=True,
+)
+
+del MOR_127_128, MOR_50_51, MOR_max, MOR_tmp, MOR_stats
 
 wl_columns = [
     "Season",
@@ -303,9 +352,17 @@ season_stats_2.columns = [
     str(col) + "_2" if col not in ["Season", "TeamID"] else str(col)
     for col in season_stats_2.columns
 ]
+MOR_1 = MOR.copy()
+MOR_1.columns = [
+    str(col) + "_1" if col not in ["Season", "TeamID"] else str(col) for col in MOR_1.columns
+]
+MOR_2 = MOR.copy()
+MOR_2.columns = [
+    str(col) + "_2" if col not in ["Season", "TeamID"] else str(col) for col in MOR_2.columns
+]
 
-# トーナメントデータ
-TCResults = pd.read_csv(INPUTDIR + "/WNCAATourneyCompactResults.csv")
+TCResults = pd.read_csv(INPUTDIR + "/MNCAATourneyCompactResults.csv")
+
 tourney1 = TCResults.loc[:, ["Season", "WTeamID", "WScore", "LTeamID", "LScore"]]
 tourney1.columns = ["Season", "TeamID1", "Score1", "TeamID2", "Score2"]
 tourney1["result"] = 1
@@ -319,7 +376,7 @@ tourney["result_score"] = tourney.Score1 - tourney.Score2
 del tourney1, tourney2
 
 # Seeds
-seeds = pd.read_csv(f"{INPUTDIR}/WNCAATourneySeeds.csv")
+seeds = pd.read_csv(f"{INPUTDIR}/MNCAATourneySeeds.csv")
 seeds["seed"] = seeds["Seed"].apply(lambda x: int(x[1:3]))
 seeds_1 = seeds[["Season", "TeamID", "seed"]].copy()
 seeds_2 = seeds[["Season", "TeamID", "seed"]].copy()
@@ -327,15 +384,15 @@ seeds_1.columns = ["Season", "TeamID1", "seed1"]
 seeds_2.columns = ["Season", "TeamID2", "seed2"]
 
 # Team Quality
-WRSCResults = pd.read_csv(INPUTDIR + "/WRegularSeasonCompactResults.csv")
+MRSCResults = pd.read_csv(INPUTDIR + "/MRegularSeasonCompactResults.csv")
 regular1 = (
-    WRSCResults[["Season", "WTeamID", "WScore", "LTeamID", "LScore"]]
+    MRSCResults[["Season", "WTeamID", "WScore", "LTeamID", "LScore"]]
     .copy()
     .rename(columns={"WTeamID": "TeamID1", "LTeamID": "TeamID2"})
 )
 regular1["result_binary"] = 1
 regular2 = (
-    WRSCResults[["Season", "WTeamID", "LTeamID"]]
+    MRSCResults[["Season", "WTeamID", "LTeamID"]]
     .copy()
     .rename(columns={"LTeamID": "TeamID1", "WTeamID": "TeamID2"})
 )
@@ -368,6 +425,47 @@ quality1 = quality[["Season", "TeamID", "quality"]].copy()
 quality2 = quality[["Season", "TeamID", "quality"]].copy()
 quality1.columns = ["Season", "TeamID1", "quality_1"]
 quality2.columns = ["Season", "TeamID2", "quality_2"]
+
+# KenPom
+kenpom = pd.read_csv(f"{INPUTDIR}/MKenpom.csv")
+kenpom_cols = [
+    "rank",
+    "adj_em",
+    "adj_o",
+    "adj_o_rank",
+    "adj_d",
+    "adj_d_rank",
+    "adj_tempo",
+    "adj_tempo_rank",
+    "luck",
+    "luck_rank",
+    "sos_adj_em",
+    "sos_adj_em_rank",
+    "sos_adj_o",
+    "sos_adj_o_rank",
+    "sos_adj_d",
+    "sos_adj_d_rank",
+    "nc_sos_adj_em",
+    "nc_sos_adj_em_rank",
+]
+kenpom_1 = kenpom[["Season", "TeamID"] + kenpom_cols].copy().rename(columns={"TeamID": "TeamID1"})
+kenpom_1 = kenpom_1.rename(columns={c: "kenpom_" + c + "_1" for c in kenpom_cols})
+kenpom_2 = kenpom[["Season", "TeamID"] + kenpom_cols].copy().rename(columns={"TeamID": "TeamID2"})
+kenpom_2 = kenpom_2.rename(columns={c: "kenpom_" + c + "_2" for c in kenpom_cols})
+diff_kenpom_cols = [
+    "adj_o",
+    "adj_o_rank",
+    "adj_d",
+    "adj_d_rank",
+    "adj_tempo",
+    "adj_tempo_rank",
+    "sos_adj_em",
+    "sos_adj_em_rank",
+    "sos_adj_o",
+    "sos_adj_o_rank",
+    "sos_adj_d",
+    "sos_adj_d_rank",
+]
 
 
 def merge_data(df):
@@ -402,12 +500,20 @@ def merge_data(df):
     )
     df = df.drop(["TeamID_x", "TeamID_y"], axis=1)
 
-    df = df.merge(seeds_1, how="left", on=["Season", "TeamID1"])
-    df = df.merge(seeds_2, how="left", on=["Season", "TeamID2"])
+    df = df.merge(MOR_1, how="left", left_on=["Season", "TeamID1"], right_on=["Season", "TeamID"])
+    df = df.merge(MOR_2, how="left", left_on=["Season", "TeamID2"], right_on=["Season", "TeamID"])
+    df = df.drop(["TeamID_x", "TeamID_y"], axis=1)
+    df["OrdinalRank_127_128_diff"] = df["OrdinalRank_127_128_1"] - df["OrdinalRank_127_128_2"]
 
     df = df.merge(quality1, how="left", on=["Season", "TeamID1"])
     df = df.merge(quality2, how="left", on=["Season", "TeamID2"])
     df["diff_quality"] = df["quality_1"] - df["quality_2"]
+
+    df = df.merge(kenpom_1, on=["Season", "TeamID1"], how="left")
+    df = df.merge(kenpom_2, on=["Season", "TeamID2"], how="left")
+
+    for col in diff_kenpom_cols:
+        df[f"diff_kenpom_{col}"] = df[f"kenpom_{col}_1"] - df[f"kenpom_{col}_2"]
 
     df = df.fillna(-1)
 
@@ -419,23 +525,23 @@ def merge_data(df):
 
 
 train = merge_data(tourney)
-# train = train.loc[train.Season >= 2003, :].reset_index(drop=True)
+train = train.loc[train.Season >= 2003, :].reset_index(drop=True)
 train.info()
 
 if STAGE_1:
     train = train.loc[train.Season < 2015, :]
 
 if STAGE_1:
-    WSampleSubmission = pd.read_csv(INPUTDIR + "/WSampleSubmissionStage1.csv")
+    MSampleSubmission = pd.read_csv(INPUTDIR + "/MSampleSubmissionStage1.csv")
 else:
-    WSampleSubmission = pd.read_csv(INPUTDIR + None)  # put stage 2 submission file link here
+    MSampleSubmission = pd.read_csv(INPUTDIR + "/MSampleSubmissionStage2.csv")
 
-test1 = WSampleSubmission.copy()
+test1 = MSampleSubmission.copy()
 test1["Season"] = test1.ID.apply(lambda x: int(x[0:4]))
 test1["TeamID1"] = test1.ID.apply(lambda x: int(x[5:9]))
 test1["TeamID2"] = test1.ID.apply(lambda x: int(x[10:14]))
 
-test2 = WSampleSubmission.copy()
+test2 = MSampleSubmission.copy()
 test2["Season"] = test2.ID.apply(lambda x: int(x[0:4]))
 test2["TeamID1"] = test2.ID.apply(lambda x: int(x[10:14]))
 test2["TeamID2"] = test2.ID.apply(lambda x: int(x[5:9]))
@@ -443,7 +549,7 @@ test2["TeamID2"] = test2.ID.apply(lambda x: int(x[5:9]))
 test = pd.concat([test1, test2]).drop(["Pred"], axis=1)
 test = merge_data(test)
 
-print(train.shape, test.shape)
+print("Train, Test dataset shapes,", train.shape, test.shape)
 
 no_feature_cols = [
     "Season",
@@ -475,10 +581,10 @@ def cauchyobj(preds, dtrain):
 
 
 param = {}
-# param['objective'] = 'reg:linear'
+param["objective"] = "reg:squarederror"
 param["eta"] = 0.02  # change to ~0.02 for final run
 param["gamma"] = 10
-param["max_depth"] = 4
+param["max_depth"] = 8
 param["min_child_weight"] = 40
 param["subsample"] = 0.7
 param["colsample_bytree"] = 0.8
@@ -486,13 +592,12 @@ param["booster"] = "gbtree"
 param["eval_metric"] = "mae"
 param["num_parallel_tree"] = 10  # recommend 10
 
-
 oof_preds = []
 test_preds = []
 
 scores = []
 importances = pd.DataFrame()
-cv_repeat = 3
+cv_repeat = 10
 
 for i in range(cv_repeat):
     seed = i * 42
@@ -512,10 +617,10 @@ for i in range(cv_repeat):
             params=param,
             dtrain=d_trn,
             evals=[(d_vld, "valid")],
-            obj=cauchyobj,
+            # obj=cauchyobj,
             early_stopping_rounds=25,
             num_boost_round=10000,
-            verbose_eval=False,
+            verbose_eval=50,
         )
 
         fold_oof_preds = model.predict(d_vld).astype(np.float64)
@@ -548,49 +653,6 @@ sns.barplot(
 plt.show()
 
 
-test_lr_outputs = []
-for i in range(cv_repeat):
-    oof = oof_preds[i]
-    test = test_preds[i]
-
-    dat = list(zip(oof, y_binary))
-    dat = sorted(dat, key=lambda x: x[0])
-    datdict = {}
-    for k in range(len(dat)):
-        datdict[dat[k][0]] = dat[k][1]
-    spline_model = UnivariateSpline(list(datdict.keys()), list(datdict.values()))
-    spline_output = spline_model(oof)
-    spline_output[spline_output <= 0.025] = 0.025
-    spline_output[spline_output >= 0.975] = 0.975
-
-    param_grid = {"C": [0.00001, 0.0001, 0.001, 0.01, 0.1, 1, 10, 100, 1000]}
-    lr_model = GridSearchCV(LogisticRegression(penalty="l2"), param_grid, scoring="neg_log_loss")
-    lr_model.fit(oof.reshape(-1, 1), y_binary)
-    lr_output = lr_model.predict_proba(oof.reshape(-1, 1))[:, 1]
-    lr_output[lr_output <= 0.025] = 0.025
-    lr_output[lr_output >= 0.975] = 0.975
-    plot_df = pd.DataFrame(
-        {"pred": oof, "label": y_binary, "spline": spline_output, "lr": lr_output}
-    )
-    plot_df["pred_int"] = plot_df["pred"].astype(int)
-    plot_df = plot_df.groupby("pred_int")[["spline", "label", "lr"]].mean().reset_index()
-    fig, ax1 = plt.subplots(figsize=(6, 4))
-    ax1.plot(plot_df.pred_int, plot_df.label)
-    ax1.plot(plot_df.pred_int, plot_df.spline)
-    ax1.plot(plot_df.pred_int, plot_df.lr)
-    plt.show()
-
-    print(log_loss(y_binary, lr_output))
-    print(log_loss(y_binary, spline_output))
-    test_lr_outputs.append(lr_model.predict_proba(test.reshape(-1, 1))[:, 1])
-
-
-mss = WSampleSubmission.copy()
-test_lr_output = np.mean(test_lr_outputs, axis=0)[: mss.shape[0]]
-mss["Pred"] = test_lr_output.copy()
-mss.loc[mss.Pred <= 0.025, "Pred"] = 0.025
-mss.loc[mss.Pred >= 0.975, "Pred"] = 0.975
-
+mss = MSampleSubmission.copy()
+mss["Pred"] = np.mean(test_preds, axis=0)[: mss.shape[0]]
 mss.to_csv(f"{OUTPUTDIR}/submit{expname.replace('_', '')}.csv", index=False)
-
-mss.shapeVy
